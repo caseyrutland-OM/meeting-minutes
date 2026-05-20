@@ -342,6 +342,39 @@
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
+    // ─── API KEY ────────────────────────────────────────────────────────────────
+    // Replace the value below with your Anthropic API key.
+    // Get one at https://console.anthropic.com
+    const ANTHROPIC_API_KEY = 'REPLACE_WITH_YOUR_ANTHROPIC_API_KEY';
+    // ────────────────────────────────────────────────────────────────────────────
+
+    const SYSTEM_PROMPT = `You are an expert meeting facilitator and minute-taker.
+Analyse the meeting transcript and return ONLY a single valid JSON object — no markdown fences, no extra commentary.
+
+JSON structure:
+{
+  "title": "Concise meeting title inferred from context",
+  "date": "Date/time if mentioned in the transcript, else null",
+  "attendees": ["Full Name or handle exactly as mentioned"],
+  "summary": ["Concise bullet summarising a key topic discussed (aim for 3-6 bullets)"],
+  "decisions": ["A clear decision that was agreed during the meeting"],
+  "actionItems": [
+    {
+      "action": "Clear, specific description of what must be done",
+      "owner": "Person responsible (name as mentioned, or 'Unassigned' if unclear)",
+      "priority": "High | Medium | Low",
+      "dueDate": "Specific date, relative deadline (e.g. 'End of week', 'Next Monday', '15 June'), or null if not mentioned"
+    }
+  ]
+}
+
+Priority rules:
+- High   → urgent, blocking others, or explicitly flagged as high priority
+- Medium → important but not time-critical
+- Low    → nice-to-have, background task, or no urgency indicated
+
+Do NOT invent information not present in the transcript. Return ONLY the JSON object.`;
+
     async function generateMinutes() {
       const transcript = document.getElementById('transcript').value.trim();
       if (!transcript) {
@@ -352,23 +385,44 @@
         showError('The transcript seems too short. Please paste the full meeting transcript.');
         return;
       }
+      if (!ANTHROPIC_API_KEY || ANTHROPIC_API_KEY === 'REPLACE_WITH_YOUR_ANTHROPIC_API_KEY') {
+        showError('No API key set. Please add your Anthropic API key to the index.html file.');
+        return;
+      }
 
       document.getElementById('generate-btn').disabled = true;
       setLoading(true);
 
       try {
-        const resp = await fetch('/api/generate', {
+        const resp = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ transcript })
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true'
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-5',
+            max_tokens: 4096,
+            system: SYSTEM_PROMPT,
+            messages: [{ role: 'user', content: `Please extract the meeting minutes from this transcript:\n\n${transcript}` }]
+          })
         });
 
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({}));
-          throw new Error(err.error || `Server error (${resp.status})`);
+          throw new Error(err.error?.message || `API error (${resp.status})`);
         }
 
-        const data = await resp.json();
+        const result = await resp.json();
+        const raw = result.content?.[0]?.text?.trim() || '';
+        const clean = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+
+        let data;
+        try { data = JSON.parse(clean); }
+        catch { throw new Error('Could not parse the AI response. Please try again.'); }
+
         renderResults(data);
       } catch (err) {
         showError(err.message || 'An unexpected error occurred. Please try again.');
