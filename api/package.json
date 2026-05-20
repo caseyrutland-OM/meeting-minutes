@@ -1,0 +1,9 @@
+{
+  "name": "meeting-minutes-api",
+  "version": "1.0.0",
+  "description": "Azure Function backend for Meeting Minutes Generator",
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0"
+  }
+}
